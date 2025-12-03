@@ -111,3 +111,7 @@ urllib3==2.2.3
 watchfiles==1.0.4
 wrapt==1.17.2
 wsproto==1.2.0
+# Chatbot and AI Search dependencies
+agno
+anthropic==0.75.0
+lancedb

@@ -1,9 +1,11 @@
 .states
 *.db
+.env
 *.py[cod]
 .web
 __pycache__/
 assets/external/
+assets/chatbot/
 academicas_clean.csv
 proyectos_total_ocde1_.csv
 publicaciones___.csv
