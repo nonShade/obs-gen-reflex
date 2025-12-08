@@ -87,10 +87,9 @@ class State(rx.State):
     chatbot_is_loading: bool = False
     chatbot_error: str = ""
 
-    ai_search_query: str = ""
-    ai_search_input_value: str = (
-        ""
-    )
+    # AI Search - Separación de estados para evitar renders innecesarios
+    ai_search_input: str = ""  # Solo para mostrar lo que escribe el usuario
+    ai_search_query: str = ""  # Solo se actualiza cuando busca explícitamente
     ai_search_loading: bool = False
     ai_search_error: str = ""
     ai_search_results_summary: str = ""
@@ -249,9 +248,7 @@ class State(rx.State):
         # df = pd.read_csv(academicas_csv, delimiter="," ,encoding="ISO-8859-1")
         df = pd.read_excel(academicas_csv)
         df = df.replace("", None)
-        df["id"] = pd.to_numeric(
-            df["id"], errors="coerce"
-        )
+        df["id"] = pd.to_numeric(df["id"], errors="coerce")
         df = df.dropna(subset=["id"])  # Elimina filas con NaN en "id"
         df["id"] = df["id"].astype(int)
         df["orcid"] = df["orcid"].fillna("")
@@ -284,13 +281,7 @@ class State(rx.State):
         self.total_investigadores = len(self.investigadores)
 
         self.all_areas = sorted(
-            df["ocde_2"]
-            .dropna()
-            .str.split(",")
-            .explode()
-            .str.strip()
-            .unique()
-            .tolist()
+            df["ocde_2"].dropna().str.split(",").explode().str.strip().unique().tolist()
         )
 
         # self.all_areas = df["ocde_2"].dropna().unique().tolist()
@@ -422,9 +413,7 @@ class State(rx.State):
         # df["rol"] = df["rol"].replace("", "Sin rol")
         df["rol"] = df["rol"].fillna("Sin Info")
         # df["año"] = df["año"].astype(int)
-        df["año"] = pd.to_numeric(
-            df["año"], errors="coerce"
-        )
+        df["año"] = pd.to_numeric(df["año"], errors="coerce")
         df["año"] = df["año"].fillna(0).astype(int)
         self.proyectos = [Proyectos(**row) for _, row in df.iterrows()]
         self.total_items = len(self.proyectos)
@@ -476,6 +465,7 @@ class State(rx.State):
             # Si no está seleccionado, lo agregamos
             self.filtro_cateegorias[filter_key].append(value)
 
+    # Chatbot functionality
     @rx.event(background=True)
     async def initialize_chatbot(self):
         """Initialize the PDF chatbot agent."""
@@ -543,33 +533,45 @@ class State(rx.State):
         finally:
             self.chatbot_is_loading = False
 
+    # Search functionality
     @rx.event
-    def set_ai_search_input(self, query: str):
-        """Set the AI search input value (optimized for typing performance)."""
-        self.ai_search_input_value = query
+    def set_ai_search_input(self, value: str):
+        """
+        SÚPER OPTIMIZADO: Solo actualiza el texto visible,
+        SIN triggear búsquedas ni renders de datos.
+        Escritura instantánea garantizada.
+        """
+        self.ai_search_input = value
 
     @rx.event
     def set_ai_search_query(self, query: str):
-        """Set the AI search query."""
-        self.ai_search_query = query
+        """DEPRECATED - usar set_ai_search_input"""
+        self.ai_search_input = query
 
     @rx.event
     def handle_ai_search_enter(self, key: str):
-        """Handle Enter key press in AI search input."""
+        """Enter key optimizado - solo busca cuando presiona Enter."""
         if key == "Enter":
-            self.ai_search_query = self.ai_search_input_value
-            self.perform_ai_search()
+            return self.perform_ai_search
 
     @rx.event
-    def perform_ai_search(self):
-        """Perform AI-powered search and update filters."""
-        if not self.ai_search_query and self.ai_search_input_value:
-            self.ai_search_query = self.ai_search_input_value
-
-        if not self.ai_search_query.strip():
-            self.ai_search_error = "Por favor ingresa una consulta de búsqueda"
+    async def perform_ai_search(self):
+        """
+        BÚSQUEDA BAJO DEMANDA: Solo se ejecuta cuando el usuario
+        explícitamente presiona Enter o el botón Buscar.
+        CERO renders mientras escribe.
+        """
+        search_text = self.ai_search_input.strip()
+        if not search_text:
+            # Si el campo está vacío, limpiar todos los filtros y mostrar todas las investigadoras
+            self.search_term = ""
+            self.selected_areas = []
+            self.ai_detected_areas = []
+            self.ai_search_results_summary = "Mostrando todas las investigadoras"
+            self.ai_search_error = ""
             return
 
+        self.ai_search_query = search_text
         self.ai_search_loading = True
         self.ai_search_error = ""
         self.ai_search_results_summary = ""
@@ -593,7 +595,7 @@ class State(rx.State):
             self.ai_search_loading = False
 
     def _perform_simple_ai_search(self):
-        """Fallback simple search when AI is not available."""
+        """Fallback simple search cuando AI no está disponible."""
         query = self.ai_search_query.lower()
 
         detected_areas = []

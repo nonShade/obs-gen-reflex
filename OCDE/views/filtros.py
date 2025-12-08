@@ -101,8 +101,8 @@ def areas_selector() -> rx.Component:
                     ),
                     rx.input(
                         placeholder="Describe lo que buscas: 'investigadoras en energías renovables' o 'expertas en biotecnología'...",
-                        value=State.ai_search_input_value,
-                        on_change=State.set_ai_search_input,
+                        value=State.ai_search_input,  # Cambiado para usar input separado
+                        on_change=State.set_ai_search_input,  # Solo actualiza texto, no busca
                         on_key_down=State.handle_ai_search_enter,
                         style={
                             "border": "none",
