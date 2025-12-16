@@ -10,8 +10,8 @@ def optimized_ai_search_input() -> rx.Component:
     return rx.input(
         placeholder="Describe lo que buscas: 'investigadoras en energías renovables' o 'expertas en biotecnología'...",
         value=State.ai_search_input,
-        on_change=State.set_ai_search_input,
-        on_key_down=State.handle_ai_search_enter,
+        on_change=State.set_ai_search_input.debounce(300),
+        on_key_down=State.handle_ai_search_enter.debounce(300),
         size="3",
         style={
             "flex": "1",

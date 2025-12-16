@@ -209,7 +209,7 @@ INSTRUCCIONES PARA BÚSQUEDA POR TÍTULOS:
         """Crea el agente Agno."""
         try:
             self.agent = Agent(
-                model=Claude(id="claude-sonnet-4-5"),
+                model=Claude(id="claude-3-5-haiku-20241022"),
                 instructions=f"""Eres un asistente inteligente especializado en búsqueda de investigadoras del Observatorio de Género en Ciencia de la Universidad de La Frontera (UFRO).
 
 INFORMACIÓN DE INVESTIGADORES CON PUBLICACIONES Y PROYECTOS:

@@ -1,5 +1,6 @@
 import reflex as rx
 from ..backend.backend import State
+from ..components.ai_search import simple_ai_search_replace
 
 # Chips y demás componentes
 chip_props = {
@@ -83,79 +84,7 @@ def areas_selector() -> rx.Component:
             class_name="text-sm sm:text-lg text-indigo-900 p-2",
         ),
         rx.vstack(
-            rx.box(
-                rx.hstack(
-                    rx.box(
-                        rx.icon("sparkles", size=16, color="white"),
-                        style={
-                            "backgroundColor": "#8b9cf7",
-                            "borderRadius": "50%",
-                            "width": "32px",
-                            "height": "32px",
-                            "display": "flex",
-                            "alignItems": "center",
-                            "justifyContent": "center",
-                            "minWidth": "32px",
-                            "marginLeft": "8px",
-                        },
-                    ),
-                    rx.input(
-                        placeholder="Describe lo que buscas: 'investigadoras en energías renovables' o 'expertas en biotecnología'...",
-                        value=State.ai_search_input,  # Cambiado para usar input separado
-                        on_change=State.set_ai_search_input,  # Solo actualiza texto, no busca
-                        on_key_down=State.handle_ai_search_enter,
-                        style={
-                            "border": "none",
-                            "outline": "none",
-                            "background": "transparent",
-                            "fontSize": "16px",
-                            "flex": "1",
-                            "padding": "0px 12px",
-                            "minHeight": "44px",
-                        },
-                        class_name="placeholder:text-gray-500",
-                    ),
-                    rx.button(
-                        rx.hstack(
-                            rx.icon("search", size=16),
-                            rx.text("Buscar", style={"fontSize": "14px"}),
-                            spacing="1",
-                            align="center",
-                        ),
-                        on_click=State.perform_ai_search,
-                        style={
-                            "backgroundColor": "#8b9cf7",
-                            "color": "white",
-                            "border": "none",
-                            "borderRadius": "8px",
-                            "padding": "10px 16px",
-                            "fontSize": "14px",
-                            "fontWeight": "600",
-                            "cursor": "pointer",
-                            "transition": "all 0.2s ease",
-                            "height": "44px",
-                            "minWidth": "100px",
-                        },
-                        class_name="hover:bg-indigo-500",
-                        disabled=State.ai_search_loading,
-                    ),
-                    spacing="2",
-                    align="center",
-                    style={"width": "100%", "alignItems": "center"},
-                ),
-                style={
-                    "backgroundColor": "white",
-                    "border": "2px solid #e5e7eb",
-                    "borderRadius": "12px",
-                    "padding": "8px 12px",
-                    "width": "100%",
-                    "transition": "all 0.2s ease",
-                    "boxShadow": "0 1px 3px rgba(0,0,0,0.1)",
-                    "display": "flex",
-                    "alignItems": "center",
-                },
-                class_name="hover:border-indigo-300 hover:shadow-md focus-within:border-indigo-500 focus-within:shadow-lg focus-within:ring-4 focus-within:ring-indigo-50",
-            ),
+            simple_ai_search_replace(),
             spacing="2",
             width="100%",
         ),

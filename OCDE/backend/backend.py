@@ -55,6 +55,13 @@ class State(rx.State):
     filtered_year: list = []
     filtered_count_pub: int = 0
 
+    # Búsqueda por cantidad mínima de proyectos y publicaciones
+    min_proyectos: str = ""
+    min_publicaciones: str = ""
+
+    # Búsqueda por rol en proyectos
+    search_rol: str = ""
+
     total_items: int = 0
     total_investigadores: int = 0
     offset: int = 0
@@ -94,6 +101,10 @@ class State(rx.State):
     ai_search_error: str = ""
     ai_search_results_summary: str = ""
     ai_detected_areas: list[str] = []
+    
+    # Cache para optimizar get_investigator_counts()
+    _cached_publicaciones_counts: dict = {}
+    _cached_proyectos_counts: dict = {}
 
     @rx.event
     def next_image(self):
@@ -140,6 +151,7 @@ class State(rx.State):
     @rx.var
     def filtered_investigators(self) -> list[Investigador]:
         term = self.search_term.lower().strip()
+        
         if term:
             filtered = [
                 inv
@@ -152,13 +164,39 @@ class State(rx.State):
             ]
         else:
             filtered = self.investigadores
-        # if self.selected_areas:
-        #     filtered = [inv for inv in filtered if inv.ocde_2 in self.selected_areas]
+
+        # Filtro por áreas OCDE seleccionadas
         if self.selected_areas:
             filtered = [
                 inv
                 for inv in filtered
                 if all(area in inv.ocde_2 for area in self.selected_areas)
+            ]
+
+        # Filtro por cantidad mínima de proyectos
+        if self.min_proyectos.strip() and self.min_proyectos.strip().isdigit():
+            min_proy = int(self.min_proyectos.strip())
+            filtered = [
+                inv
+                for inv in filtered
+                if self.get_investigator_counts(inv)["proyectos"] >= min_proy
+            ]
+
+        # Filtro por cantidad mínima de publicaciones
+        if self.min_publicaciones.strip() and self.min_publicaciones.strip().isdigit():
+            min_pub = int(self.min_publicaciones.strip())
+            filtered = [
+                inv
+                for inv in filtered
+                if self.get_investigator_counts(inv)["publicaciones"] >= min_pub
+            ]
+
+        # Filtro por rol en proyectos
+        if self.search_rol.strip():
+            filtered = [
+                inv
+                for inv in filtered
+                if self.investigator_has_rol(inv, self.search_rol.strip())
             ]
 
         return filtered
@@ -222,7 +260,51 @@ class State(rx.State):
         """Actualiza la búsqueda."""
         self.search_term = term
 
-    @rx.var(cache=False)
+    @rx.event
+    def set_min_proyectos(self, value: str):
+        """Establece el filtro de cantidad mínima de proyectos."""
+        # Validación: solo permitir números positivos
+        if value.strip() == "":
+            self.min_proyectos = ""
+        elif value.strip().isdigit() and int(value.strip()) >= 0:
+            self.min_proyectos = value.strip()
+        # Si no es válido, mantener el valor anterior (no hacer nada)
+
+    @rx.event
+    def set_min_publicaciones(self, value: str):
+        """Establece el filtro de cantidad mínima de publicaciones."""
+        # Validación: solo permitir números positivos
+        if value.strip() == "":
+            self.min_publicaciones = ""
+        elif value.strip().isdigit() and int(value.strip()) >= 0:
+            self.min_publicaciones = value.strip()
+        # Si no es válido, mantener el valor anterior (no hacer nada)
+
+    @rx.event
+    def set_search_rol(self, value: str):
+        """Establece el filtro de búsqueda por rol."""
+        # Validación: limpiar espacios en blanco
+        self.search_rol = value.strip()
+
+    @rx.var(cache=True)
+    def search_results_empty(self) -> bool:
+        """Indica si los resultados de búsqueda están vacíos."""
+        return len(self.filtered_investigators) == 0
+
+    @rx.var(cache=True)
+    def search_message(self) -> str:
+        """Mensaje para mostrar información sobre la búsqueda."""
+        total = len(self.filtered_investigators)
+        if total == 0:
+            if (self.search_term.strip() or self.min_proyectos.strip() or
+                self.min_publicaciones.strip() or self.search_rol.strip() or
+                self.selected_areas):
+                return "No se encontraron investigadoras que coincidan con los filtros aplicados."
+            else:
+                return "No hay datos disponibles."
+        else:
+            return f"Se encontraron {total} investigadoras."
+    @rx.var
     def current_investigator(self) -> Optional[Investigador]:
         if not self.id:
             return None
@@ -237,19 +319,22 @@ class State(rx.State):
 
     def load_investigador(self, id: int | None = None):
         inv = next((x for x in self.investigators if x["id"] == id), None)
-        self.current_investigator = inv
+        # self.current_investigator = inv  # Comentado: current_investigator es ahora computed var
 
     @rx.var
     def current_investigator_is_none(self) -> bool:
         return self.current_investigator is None
 
+    @rx.event
     def load_academicas(self):
         # df = pd.read_csv(academicas_csv, encoding="ISO-8859-1")
         # df = pd.read_csv(academicas_csv, delimiter="," ,encoding="ISO-8859-1")
         df = pd.read_excel(academicas_csv)
+        
         df = df.replace("", None)
         df["id"] = pd.to_numeric(df["id"], errors="coerce")
         df = df.dropna(subset=["id"])  # Elimina filas con NaN en "id"
+        
         df["id"] = df["id"].astype(int)
         df["orcid"] = df["orcid"].fillna("")
         df["grado_mayor"] = df["grado_mayor"].astype(str)
@@ -284,8 +369,92 @@ class State(rx.State):
             df["ocde_2"].dropna().str.split(",").explode().str.strip().unique().tolist()
         )
 
-        # self.all_areas = df["ocde_2"].dropna().unique().tolist()
-        # self.all_areas = df["programa"].dropna().unique().tolist()
+        # Precargar datos de proyectos y publicaciones para mejorar rendimiento de búsquedas
+        try:
+            self._preload_search_data()
+        except Exception as e:
+            print(f"Error en preload search data: {e}")
+
+        # Calcular estadísticas básicas para optimización
+
+        # Opcional: Crear índices o estadísticas de conteo por RUT para optimizar búsquedas
+        # Esto podría expandirse en el futuro si es necesario
+
+    def get_investigator_counts(self, investigador: Investigador) -> dict:
+        """Calcula la cantidad de proyectos y publicaciones para un investigador usando cache."""
+        try:
+            # Usar datos precargados para evitar recargar CSVs constantemente
+            if not self._cached_proyectos_counts or not self._cached_publicaciones_counts:
+                import pandas as pd
+                df_proyectos = pd.read_csv(proyectos_csv, encoding="utf-8-sig")
+                df_publicaciones = pd.read_csv(publicaciones_csv, encoding="utf-8-sig")
+                
+                # Inicializar cache vacío ANTES de llenar
+                self._cached_proyectos_counts = {}
+                self._cached_publicaciones_counts = {}
+                
+                # Pre-calcular conteos para todos los RUTs únicos
+                for rut in df_proyectos['rut_ir'].unique():
+                    count = len(df_proyectos[df_proyectos['rut_ir'] == rut])
+                    self._cached_proyectos_counts[str(rut)] = count
+                
+                for rut in df_publicaciones['rut_ir'].unique():
+                    count = len(df_publicaciones[df_publicaciones['rut_ir'] == rut])
+                    self._cached_publicaciones_counts[str(rut)] = count
+
+            # Usar cache para obtener conteos (asegurar que RUT sea string)
+            rut_str = str(investigador.rut_ir)
+            proyectos_count = self._cached_proyectos_counts.get(rut_str, 0)
+            publicaciones_count = self._cached_publicaciones_counts.get(rut_str, 0)
+
+            return {
+                "proyectos": proyectos_count,
+                "publicaciones": publicaciones_count
+            }
+        except Exception as e:
+            print(f"Error calculating counts for {investigador.name}: {e}")
+            return {"proyectos": 0, "publicaciones": 0}
+
+    def investigator_has_rol(self, investigador: Investigador, search_rol: str) -> bool:
+        """Verifica si un investigador tiene un rol específico en sus proyectos."""
+        try:
+            import pandas as pd
+            df_proyectos = pd.read_csv(proyectos_csv, encoding="utf-8-sig")
+
+            # Buscar proyectos del investigador
+            investigador_proyectos = df_proyectos[df_proyectos["rut_ir"] == investigador.rut_ir]
+
+            # Si no tiene proyectos, no puede tener roles - CORREGIDO
+            if len(investigador_proyectos) == 0:
+                return False
+
+            # Buscar el rol en los proyectos del investigador
+            search_rol_lower = search_rol.lower()
+
+            # Términos comunes para roles
+            rol_mapping = {
+                "ir": "investigador responsable",
+                "co-i": "co-investigador",
+                "coinvestigador": "co-investigador",
+                "co investigador": "co-investigador",
+                "investigador responsable": "investigador responsable",
+                "responsable": "investigador responsable"
+            }
+
+            # Aplicar mapeo si existe
+            search_rol_final = rol_mapping.get(search_rol_lower, search_rol_lower)
+
+            for _, proyecto in investigador_proyectos.iterrows():
+                rol_proyecto = str(proyecto.get("rol", "")).lower()
+                if (search_rol_lower in rol_proyecto or
+                    search_rol_final in rol_proyecto or
+                    any(term in rol_proyecto for term in search_rol_lower.split())):
+                    return True
+
+            return False
+        except Exception as e:
+            print(f"Error checking rol for {investigador.name}: {e}")
+            return False
 
     # def load_investigador(self, id: int):
     #     # Este método se invocará cuando el usuario visite /investigador/<id>.
@@ -310,11 +479,10 @@ class State(rx.State):
                         "codigo",
                         "titulo",
                         "año",
-                        "disciplina",
+                        "ocde_2",
                         "tipo_proyecto",
                         "investigador_responsable",
-                        "co_investigador",
-                        "unidad",
+                        "rol",
                     ]
                 )
             ]
@@ -563,11 +731,14 @@ class State(rx.State):
         """
         search_text = self.ai_search_input.strip()
         if not search_text:
-            # Si el campo está vacío, limpiar todos los filtros y mostrar todas las investigadoras
+            # Si el campo está vacío, limpiar TODOS los filtros y mostrar todas las investigadoras
             self.search_term = ""
             self.selected_areas = []
             self.ai_detected_areas = []
-            self.ai_search_results_summary = "Mostrando todas las investigadoras"
+            self.min_proyectos = ""
+            self.min_publicaciones = ""
+            self.search_rol = ""
+            self.ai_search_results_summary = "Mostrando todas las investigadoras (409 total)"
             self.ai_search_error = ""
             return
 
@@ -595,19 +766,61 @@ class State(rx.State):
             self.ai_search_loading = False
 
     def _perform_simple_ai_search(self):
-        """Fallback simple search cuando AI no está disponible."""
+        """Fallback simple search cuando AI no está disponible con detección de filtros numéricos."""
         query = self.ai_search_query.lower()
-
+        
+        # Detectar patrones de cantidad de proyectos - más flexible
+        import re
+        # Patrones simplificados que detectan "mas/más de X" con y sin tilde
+        proyecto_pattern = r'(?:más|mas)\s+de\s+(\d+)\s*(?:proyectos?|projects?)'
+        pub_pattern = r'(?:más|mas)\s+de\s+(\d+)\s*(?:publicaciones?|publications?|papers?)'
+        
+        # Buscar cantidades en la consulta
+        proyecto_match = re.search(proyecto_pattern, query)
+        pub_match = re.search(pub_pattern, query)
+        
         detected_areas = []
+        applied_filters = []
+        
+        # Aplicar filtro de proyectos si se detecta
+        if proyecto_match:
+            min_proyectos = int(proyecto_match.group(1))
+            self.min_proyectos = str(min_proyectos)
+            applied_filters.append(f"mínimo {min_proyectos} proyectos")
+        else:
+            self.min_proyectos = ""
+        
+        # Aplicar filtro de publicaciones si se detecta
+        if pub_match:
+            min_publicaciones = int(pub_match.group(1))
+            self.min_publicaciones = str(min_publicaciones)
+            applied_filters.append(f"mínimo {min_publicaciones} publicaciones")
+        else:
+            self.min_publicaciones = ""
+        
+        # Detectar áreas OCDE en la consulta
         for area in self.all_areas:
             if any(word in area.lower() for word in query.split()):
                 detected_areas.append(area)
 
-        self.ai_detected_areas = detected_areas[:3]
-        self.selected_areas = detected_areas[:3]
-        self.search_term = self.ai_search_query
+        # Solo aplicar filtros de área si no hay filtros numéricos más específicos
+        if not (proyecto_match or pub_match):
+            self.ai_detected_areas = detected_areas[:3]
+            self.selected_areas = detected_areas[:3]
+            self.search_term = self.ai_search_query
+        else:
+            # Limpiar otros filtros para enfocarse en cantidades
+            self.ai_detected_areas = []
+            self.selected_areas = []
+            self.search_term = ""
 
-        self.ai_search_results_summary = f"Búsqueda simple por '{self.ai_search_query}'. Encontradas {len(detected_areas)} áreas relacionadas."
+        # Crear resumen de filtros aplicados
+        if applied_filters:
+            filters_text = " y ".join(applied_filters)
+            areas_text = f" en {len(detected_areas)} áreas relacionadas" if detected_areas else ""
+            self.ai_search_results_summary = f"Buscando investigadoras con {filters_text}{areas_text}."
+        else:
+            self.ai_search_results_summary = f"Búsqueda simple por '{self.ai_search_query}'. Encontradas {len(detected_areas)} áreas relacionadas."
 
     def _process_ai_search_response(self, response):
         """Process AI response and update search filters with auto-detection intelligence."""
@@ -626,6 +839,22 @@ class State(rx.State):
                 else:
                     self._perform_simple_ai_search()
                     return
+
+            # PRIMERO: Detectar filtros numéricos en la consulta original
+            import re
+            query_original = self.ai_search_query.lower()
+            
+            # Patrones de filtros numéricos
+            proyecto_pattern = r'(?:más|mas)\s+de\s+(\d+)\s*(?:proyectos?|projects?)'
+            pub_pattern = r'(?:más|mas)\s+de\s+(\d+)\s*(?:publicaciones?|publications?|papers?)'
+            
+            proyecto_match = re.search(proyecto_pattern, query_original)
+            pub_match = re.search(pub_pattern, query_original)
+            
+            # Si detectamos filtros numéricos, usar lógica simple en lugar del AI processing
+            if proyecto_match or pub_match:
+                self._perform_simple_ai_search()
+                return
 
             tipo_busqueda = data.get("tipo_busqueda", "area")
             detected_areas = data.get("areas_detectadas", [])
@@ -676,6 +905,7 @@ class State(rx.State):
             self.ai_search_results_summary = summary
 
         except Exception as e:
+            self.ai_search_error = f"Error procesando respuesta: {str(e)}"
             self._perform_simple_ai_search()
 
     @rx.event

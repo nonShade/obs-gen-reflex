@@ -90,7 +90,7 @@ def obs_indicadores():
 
 # Página de indicadores
 @rx.page(route="/obs_otros_indicadores", title="Otros Indicadores")
-def obs_indicadores():
+def obs_otros_indicadores():
     return rx.vstack(
         huincha(),
         banner_generator("/banner_indicadores.png"),
@@ -230,11 +230,32 @@ def academicas():
         navbar_main(),
         navbar_searchbar(),
         areas_selector(),
+        # Mensaje de feedback de búsqueda
+        rx.box(
+            rx.text(
+                State.search_message,
+                size="3",
+                class_name="text-gray-600 text-center p-4"
+            ),
+            width="100%",
+            class_name="md:px-40 px-5"
+        ),
         rx.flex(
-            rx.hstack(
-                rx.foreach(State.filtered_investigators, investigador_card),
-                wrap="wrap",
-                justify="center",
+            rx.cond(
+                ~State.search_results_empty,
+                rx.hstack(
+                    rx.foreach(State.filtered_investigators, investigador_card),
+                    wrap="wrap",
+                    justify="center",
+                ),
+                rx.box(
+                    rx.text(
+                        "Intenta ajustar los filtros de búsqueda.",
+                        size="2",
+                        class_name="text-gray-500 text-center"
+                    ),
+                    class_name="py-8"
+                )
             ),
             class_name="w-full md:px-40 p-5",
             flex="1",
@@ -543,7 +564,7 @@ def investigator_page():
                         rx.avatar(
                             size="9",
                             # color_scheme="crimson",
-                            fallback=State.current_investigator.name[0],
+                            fallback=State.get_initials,
                             radius="full",
                             variant="solid",
                             color_scheme="iris",
