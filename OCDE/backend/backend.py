@@ -728,32 +728,33 @@ class State(rx.State):
         if key == "Enter":
             return self.perform_ai_search
 
-    @rx.event
+    @rx.event(background=True)
     async def perform_ai_search(self):
         """
         BÚSQUEDA BAJO DEMANDA: Solo se ejecuta cuando el usuario
         explícitamente presiona Enter o el botón Buscar.
         CERO renders mientras escribe.
         """
-        search_text = self.ai_search_input.strip()
-        if not search_text:
-            # Si el campo está vacío, limpiar TODOS los filtros y mostrar todas las investigadoras
-            self.search_term = ""
-            self.selected_areas = []
-            self.ai_detected_areas = []
-            self.min_proyectos = ""
-            self.min_publicaciones = ""
-            self.search_rol = ""
-            self.ai_search_results_summary = (
-                "Mostrando todas las investigadoras (409 total)"
-            )
-            self.ai_search_error = ""
-            return
+        async with self:
+            search_text = self.ai_search_input.strip()
+            if not search_text:
+                # Si el campo está vacío, limpiar TODOS los filtros y mostrar todas las investigadoras
+                self.search_term = ""
+                self.selected_areas = []
+                self.ai_detected_areas = []
+                self.min_proyectos = ""
+                self.min_publicaciones = ""
+                self.search_rol = ""
+                self.ai_search_results_summary = (
+                    "Mostrando todas las investigadoras (409 total)"
+                )
+                self.ai_search_error = ""
+                return
 
-        self.ai_search_query = search_text
-        self.ai_search_loading = True
-        self.ai_search_error = ""
-        self.ai_search_results_summary = ""
+            self.ai_search_query = search_text
+            self.ai_search_loading = True
+            self.ai_search_error = ""
+            self.ai_search_results_summary = ""
 
         try:
             from .chatbot.ai_search_agent import (
@@ -762,16 +763,26 @@ class State(rx.State):
             )
 
             if not is_ai_search_ready():
-                self._perform_simple_ai_search()
+                # Agregar delay para hacer visible el loading
+                await asyncio.sleep(0.5)
+                async with self:
+                    self._perform_simple_ai_search()
             else:
-                response = get_ai_search_response(self.ai_search_query)
-                self._process_ai_search_response(response)
+                # Agregar un pequeño delay para hacer visible el loading
+                await asyncio.sleep(0.5)  
+                response = await asyncio.get_event_loop().run_in_executor(
+                    None, get_ai_search_response, self.ai_search_query
+                )
+                async with self:
+                    self._process_ai_search_response(response)
 
         except Exception as e:
-            self.ai_search_error = f"Error en búsqueda con IA: {str(e)}"
-            self._perform_simple_ai_search()
+            async with self:
+                self.ai_search_error = f"Error en búsqueda con IA: {str(e)}"
+                self._perform_simple_ai_search()
         finally:
-            self.ai_search_loading = False
+            async with self:
+                self.ai_search_loading = False
 
     def _perform_simple_ai_search(self):
         """Fallback simple search cuando AI no está disponible con detección de filtros numéricos y roles."""

@@ -183,7 +183,7 @@ def simple_ai_search_replace() -> rx.Component:
         ),
         rx.button(
             rx.icon("sparkles", size=16),
-            "Buscar con IA",
+            "Buscar",
             on_click=State.perform_ai_search,  # Busca al hacer clic
             size="2",
             color_scheme="indigo",
