@@ -380,6 +380,35 @@ class State(rx.State):
         except Exception as e:
             print(f"Error en preload search data: {e}")
 
+    def _preload_search_data(self):
+        """Preload search data to improve performance."""
+        try:
+            import pandas as pd
+
+            # Precargar datos de proyectos y publicaciones
+            df_proyectos = pd.read_csv(proyectos_csv, encoding="utf-8-sig")
+            df_publicaciones = pd.read_csv(publicaciones_csv, encoding="utf-8-sig")
+
+            # Inicializar cache
+            self._cached_proyectos_counts = {}
+            self._cached_publicaciones_counts = {}
+
+            # Pre-calcular conteos
+            for rut in df_proyectos["rut_ir"].unique():
+                if pd.notna(rut):
+                    count = len(df_proyectos[df_proyectos["rut_ir"] == rut])
+                    self._cached_proyectos_counts[str(rut)] = count
+
+            for rut in df_publicaciones["rut_ir"].unique():
+                if pd.notna(rut):
+                    count = len(df_publicaciones[df_publicaciones["rut_ir"] == rut])
+                    self._cached_publicaciones_counts[str(rut)] = count
+
+        except Exception as e:
+            print(f"Error preloading search data: {e}")
+            self._cached_proyectos_counts = {}
+            self._cached_publicaciones_counts = {}
+
     def get_investigator_counts(self, investigador: Investigador) -> dict:
         """Calcula la cantidad de proyectos y publicaciones para un investigador usando cache."""
         try:
@@ -677,35 +706,64 @@ class State(rx.State):
         self.chatbot_input = value
 
     @rx.event
-    async def handle_send_chatbot_message(self):
-        """Handle sending a message to the chatbot."""
-        if not self.chatbot_input.strip():
+    def handle_chatbot_key_press(self, key: str):
+        """Handle key press in chatbot input."""
+        if (
+            key == "Enter"
+            and not self.chatbot_is_loading
+            and self.chatbot_input.strip()
+        ):
+            return self.send_user_message_immediate
+
+    @rx.event
+    def send_user_message_immediate(self):
+        """Send user message and start loading immediately."""
+        if not self.chatbot_input.strip() or self.chatbot_is_loading:
             return
 
+        user_message = {"role": "user", "content": self.chatbot_input.strip()}
+        self.chatbot_messages.append(user_message)
+
+        user_input = self.chatbot_input.strip()
+        self.chatbot_input = ""
+
+        self.chatbot_is_loading = True
+        self.chatbot_error = ""
+
+        return State.process_ai_response(user_input)
+
+    @rx.event(background=True)
+    async def process_ai_response(self, user_input: str):
+        """Process AI response in background."""
         try:
-            self.chatbot_is_loading = True
-            self.chatbot_error = ""
+            # Pequeña pausa para asegurar que el loading se vea
+            import asyncio
 
-            user_message = {"role": "user", "content": self.chatbot_input.strip()}
-            self.chatbot_messages.append(user_message)
-
-            user_input = self.chatbot_input.strip()
-            self.chatbot_input = ""
+            await asyncio.sleep(0.1)
 
             from .chatbot.pdf_agent import get_pdf_chatbot_response
 
+            # Procesar respuesta de IA
             response = get_pdf_chatbot_response(user_input)
 
-            assistant_message = {"role": "assistant", "content": response}
-            self.chatbot_messages.append(assistant_message)
+            # Actualizar estado con respuesta de IA
+            async with self:
+                assistant_message = {"role": "assistant", "content": response}
+                self.chatbot_messages.append(assistant_message)
 
         except Exception as e:
-            self.chatbot_error = f"Error: {str(e)}"
-            if self.chatbot_messages and self.chatbot_messages[-1]["role"] == "user":
-                self.chatbot_messages.pop()
+            async with self:
+                self.chatbot_error = f"Error: {str(e)}"
+                # Remover mensaje del usuario si hubo error
+                if (
+                    self.chatbot_messages
+                    and self.chatbot_messages[-1]["role"] == "user"
+                ):
+                    self.chatbot_messages.pop()
 
         finally:
-            self.chatbot_is_loading = False
+            async with self:
+                self.chatbot_is_loading = False
 
     # Search functionality
     @rx.event
@@ -719,7 +777,6 @@ class State(rx.State):
 
     @rx.event
     def set_ai_search_query(self, query: str):
-        """DEPRECATED - usar set_ai_search_input"""
         self.ai_search_input = query
 
     @rx.event
@@ -769,7 +826,7 @@ class State(rx.State):
                     self._perform_simple_ai_search()
             else:
                 # Agregar un pequeño delay para hacer visible el loading
-                await asyncio.sleep(0.5)  
+                await asyncio.sleep(0.5)
                 response = await asyncio.get_event_loop().run_in_executor(
                     None, get_ai_search_response, self.ai_search_query
                 )
