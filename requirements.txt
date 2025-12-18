@@ -114,4 +114,6 @@ wsproto==1.2.0
 # Chatbot and AI Search dependencies
 agno
 anthropic==0.75.0
-lancedb
+mypdf
+pypdf
+python-dotenv
