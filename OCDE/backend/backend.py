@@ -170,7 +170,7 @@ class State(rx.State):
             filtered = [
                 inv
                 for inv in filtered
-                if all(area in inv.ocde_2 for area in self.selected_areas)
+                if any(area in inv.ocde_2 for area in self.selected_areas)
             ]
 
         # Filtro por cantidad mínima de proyectos
